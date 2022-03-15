@@ -375,6 +375,8 @@ class Ferc1ToSqliteSettings(GenericDatasetSettings):
     data_source: ClassVar[DataSource] = DataSource.from_id("ferc1")
     years: List[int] = data_source.working_partitions["years"]
     tables: List[str] = sorted(list(DBF_TABLES_FILENAMES.keys()))
+    xbrl_tax_path: str = "https://eCollection.ferc.gov/taxonomy/form1/" \
+                         "2022-01-01/form/form1/form-1_2022-01-01.xsd"
 
     refyear: ClassVar[int] = max(years)
     bad_cols: tuple = ()
