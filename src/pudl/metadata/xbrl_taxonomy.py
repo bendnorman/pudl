@@ -1,15 +1,36 @@
 """XBRL prototype structures."""
-from typing import ForwardRef, List, Optional
+from typing import Dict, ForwardRef, List, Optional, Set
 
+from arelle.ModelInstanceObject import ModelFact
 from pydantic import root_validator, validator
 
 from .classes import Base, HttpUrl
 
-XBRL_MAP = {
-    'f1_fuel': {
-        'pages': [402]
+
+def _extract_name(qname: str) -> str:
+    """Get name from qname."""
+    return qname.split(':')[1]
+
+
+def _fact_to_dict(fact: ModelFact) -> Dict:
+    """Create a dictionary describing a single fact."""
+    fact_dict = {
+        "value": fact.value
     }
-}
+
+    if fact.context.qnameDims:
+        fact_dict["dims"] = {_extract_name(str(qname)): dim.propertyView[1]
+                             for qname, dim in fact.context.qnameDims.items()}
+
+    if fact.context.isInstantPeriod:
+        fact_dict["date"] = fact.context.instantDatetime
+    else:
+        fact_dict["start_date"] = fact.context.startDatetime
+        fact_dict["end_date"] = fact.context.endDatetime
+
+    print(fact_dict)
+
+    return fact_dict
 
 
 Concept = ForwardRef('Concept')
@@ -47,12 +68,24 @@ class Concept(Base):
             child_concepts=[Concept.from_list(concept) for concept in concept_list[3:]]
         )
 
+    def get_facts(self, fact_dict: Dict[str, Set[ModelFact]]):
+        """Create structured dict of facts."""
+        if len(self.child_concepts) > 0:
+            return {_extract_name(concept.name): concept.get_facts(fact_dict)
+                    for concept in self.child_concepts}
+
+        facts = fact_dict.get(self.name)
+        if not facts:
+            return None
+
+        return [_fact_to_dict(fact) for fact in facts]
+
 
 Concept.update_forward_refs()
 
 
-class Abstract(Base):
-    """Abstract."""
+class LinkRole(Base):
+    """LinkRole."""
 
     role: HttpUrl
     definition: str
@@ -73,23 +106,28 @@ class Abstract(Base):
 class Taxonomy(Base):
     """Taxonomy."""
 
-    taxonomy: List['Concept']
+    roles: List['LinkRole']
 
-    @validator('taxonomy', pre=True)
-    def validate_taxonomy(cls, taxonomy):
+    @validator('roles', pre=True)
+    def validate_taxonomy(cls, roles):
         """Create children."""
-        taxonomy = [Concept.from_list(linkrole) for linkrole in taxonomy]
+        taxonomy = [LinkRole.from_list(role) for role in roles]
         return taxonomy
 
-    def get_page(self, page_num: int, section: str = None) -> List[Concept]:
+    def get_page(self, page_num: int, section: str = None) -> List[LinkRole]:
         """Helper to get tables from page."""
         roles = []
         page_id = str(page_num).zfill(3)
         if section:
             page_id += section
 
-        for role in self.taxonomy:
+        for role in self.roles:
             if role.definition.startswith(page_id):
                 roles.append(role)
 
         return roles
+
+    def get_fact_table(self, page_num: int, fact_dict, section: str = None):
+        """Create structured fact table."""
+        return [role.concepts.get_facts(fact_dict)
+                for role in self.get_page(page_num, section)]
